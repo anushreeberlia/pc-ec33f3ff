@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SF Tennis Court Bot</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+            transition: transform 0.2s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+        }
+
+        .card h2 {
+            color: #4a5568;
+            margin-bottom: 20px;
+            font-size: 1.4rem;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="email"] {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.2s ease;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn.btn-danger {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+        }
+
+        .btn.btn-secondary {
+            background: linear-gradient(135deg, #a8a8a8 0%, #8e8e8e 100%);
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .status-item {
+            text-align: center;
+            padding: 15px;
+            background: #f7fafc;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .status-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .status-label {
+            font-size: 0.9rem;
+            color: #718096;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-indicator.running {
+            background: #48bb78;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.stopped {
+            background: #f56565;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .log-container {
+            background: #1a202c;
+            border-radius: 8px;
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+        }
+
+        .log-entry {
+            color: #e2e8f0;
+            margin-bottom: 5px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .log-entry:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .alert.success {
+            background: #c6f6d5;
+            border-left: 4px solid #48bb78;
+            color: #22543d;
+        }
+
+        .alert.error {
+            background: #fed7d7;
+            border-left: 4px solid #f56565;
+            color: #742a2a;
+        }
+
+        .alert.info {
+            background: #bee3f8;
+            border-left: 4px solid #4299e1;
+            color: #2a4365;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .card {
+                padding: 20px;
+            }
+
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .btn {
+                width: 100%;
+                margin-right: 0;
+            }
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 1000;
+        }
+
+        .connection-status.connected {
+            background: #48bb78;
+            color: white;
+        }
+
+        .connection-status.disconnected {
+            background: #f56565;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status" id="connectionStatus">Connecting...</div>
+    
+    <div class="container">
+        <div class="header">
+            <h1>🎾 SF Tennis Court Bot</h1>
+            <p>Automated Alice Marble Tennis Court Reservations</p>
+        </div>
+
+        <!-- Credentials Setup -->
+        <div class="card">
+            <h2>🔐 Account Credentials</h2>
+            <div id="credentialsAlert"></div>
+            <div class="form-group">
+                <label for="username">Username/Email:</label>
+                <input type="text" id="username" placeholder="Enter your SF Rec account username or email">
+            </div>
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" placeholder="Enter your password">
+            </div>
+            <button class="btn" onclick="saveCredentials()">💾 Save Credentials</button>
+        </div>
+
+        <!-- Bot Controls -->
+        <div class="card">
+            <h2>🤖 Bot Controls</h2>
+            <div class="controls">
+                <span id="botStatusIndicator">
+                    <span class="status-indicator stopped"></span>
+                    <span>Bot Status: Stopped</span>
+                </span>
+                <button class="btn" id="startBtn" onclick="startBot()">▶️ Start Bot</button>
+                <button class="btn btn-danger" id="stopBtn" onclick="stopBot()" disabled>⏹️ Stop Bot</button>
+                <button class="btn btn-secondary" onclick="bookNow()">🎾 Book Now</button>
+                <button class="btn btn-secondary" onclick="clearLogs()">🗑️ Clear Logs</button>
+            </div>
+        </div>
+
+        <!-- Status Dashboard -->
+        <div class="card">
+            <h2>📊 Status Dashboard</h2>
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="status-value" id="bookingAttempts">0</div>
+                    <div class="status-label">Booking Attempts</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="successfulBookings">0</div>
+                    <div class="status-label">Successful Bookings</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="lastCheck">Never</div>
+                    <div class="status-label">Last Check</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="nextCheck">-</div>
+                    <div class="status-label">Next Check</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Activity Log -->
+        <div class="card">
+            <h2>📝 Activity Log</h2>
+            <div class="log-container" id="logContainer">
+                <div class="log-entry">Bot initialized. Waiting for credentials...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let botRunning = false;
+        let hasCredentials = false;
+
+        // Socket connection status
+        socket.on('connect', () => {
+            updateConnectionStatus(true);
+        });
+
+        socket.on('disconnect', () => {
+            updateConnectionStatus(false);
+        });
+
+        socket.on('log', (message) => {
+            addLogEntry(message);
+        });
+
+        socket.on('statusUpdate', (status) => {
+            updateStatus(status);
+        });
+
+        function updateConnectionStatus(connected) {
+            const statusEl = document.getElementById('connectionStatus');
+            if (connected) {
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'connection-status connected';
+            } else {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'connection-status disconnected';
+            }
+        }
+
+        function addLogEntry(message) {
+            const logContainer = document.getElementById('logContainer');
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.textContent = message;
+            logContainer.insertBefore(logEntry, logContainer.firstChild);
+
+            // Keep only last 100 entries
+            while (logContainer.children.length > 100) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+
+        function updateStatus(status) {
+            botRunning = status.isRunning;
+            hasCredentials = status.hasCredentials;
+
+            // Update status indicator
+            const indicator = document.querySelector('#botStatusIndicator .status-indicator');
+            const statusText = document.querySelector('#botStatusIndicator span:last-child');
+            
+            if (status.isRunning) {
+                indicator.className = 'status-indicator running';
+                statusText.textContent = 'Bot Status: Running';
+            } else {
+                indicator.className = 'status-indicator stopped';
+                statusText.textContent = 'Bot Status: Stopped';
+            }
+
+            // Update buttons
+            document.getElementById('startBtn').disabled = status.isRunning || !status.hasCredentials;
+            document.getElementById('stopBtn').disabled = !status.isRunning;
+
+            // Update stats
+            document.getElementById('bookingAttempts').textContent = status.bookingAttempts;
+            document.getElementById('successfulBookings').textContent = status.successfulBookings;
+            document.getElementById('lastCheck').textContent = status.lastCheck || 'Never';
+            document.getElementById('nextCheck').textContent = status.nextCheck || '-';
+        }
+
+        async function saveCredentials() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const alertEl = document.getElementById('credentialsAlert');
+
+            if (!username || !password) {
+                showAlert('error', 'Please enter both username and password', alertEl);
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/credentials', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showAlert('success', 'Credentials saved successfully!', alertEl);
+                    hasCredentials = true;
+                    document.getElementById('startBtn').disabled = false;
+                    // Clear password field for security
+                    document.getElementById('password').value = '';
+                } else {
+                    showAlert('error', result.error, alertEl);
+                }
+            } catch (error) {
+                showAlert('error', 'Failed to save credentials: ' + error.message, alertEl);
+            }
+        }
+
+        async function startBot() {
+            if (!hasCredentials) {
+                alert('Please set your credentials first!');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/bot/start', { method: 'POST' });
+                const result = await response.json();
+
+                if (response.ok) {
+                    addLogEntry('✅ ' + result.message);
+                } else {
+                    addLogEntry('❌ ' + result.error);
+                }
+            } catch (error) {
+                addLogEntry('❌ Failed to start bot: ' + error.message);
+            }
+        }
+
+        async function stopBot() {
+            try {
+                const response = await fetch('/api/bot/stop', { method: 'POST' });
+                const result = await response.json();
+
+                if (response.ok) {
+                    addLogEntry('⏹️ ' + result.message);
+                } else {
+                    addLogEntry('❌ ' + result.error);
+                }
+            } catch (error) {
+                addLogEntry('❌ Failed to stop bot: ' + error.message);
+            }
+        }
+
+        async function bookNow() {
+            if (!hasCredentials) {
+                alert('Please set your credentials first!');
+                return;
+            }
+
+            addLogEntry('🎾 Manual booking attempt initiated...');
+
+            try {
+                const response = await fetch('/api/book-now', { method: 'POST' });
+                const result = await response.json();
+
+                if (response.ok) {
+                    if (result.success) {
+                        addLogEntry('✅ ' + result.message);
+                    } else {
+                        addLogEntry('ℹ️ ' + result.message);
+                    }
+                } else {
+                    addLogEntry('❌ ' + result.error);
+                }
+            } catch (error) {
+                addLogEntry('❌ Manual booking failed: ' + error.message);
+            }
+        }
+
+        async function clearLogs() {
+            try {
+                const response = await fetch('/api/clear-logs', { method: 'POST' });
+                if (response.ok) {
+                    document.getElementById('logContainer').innerHTML = '<div class="log-entry">Logs cleared.</div>';
+                }
+            } catch (error) {
+                addLogEntry('❌ Failed to clear logs: ' + error.message);
+            }
+        }
+
+        function showAlert(type, message, container) {
+            container.innerHTML = `<div class="alert ${type}">${message}</div>`;
+            setTimeout(() => {
+                container.innerHTML = '';
+            }, 5000);
+        }
+
+        // Initialize status on page load
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(status => updateStatus(status))
+            .catch(error => console.error('Failed to load initial status:', error));
+    </script>
+</body>
+</html>
