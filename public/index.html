@@ -279,6 +279,25 @@
             background: #f56565;
             color: white;
         }
+
+        .credentials-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+
+        .credentials-status.saved {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .credentials-status.missing {
+            background: #fed7d7;
+            color: #742a2a;
+        }
     </style>
 </head>
 <body>
@@ -292,7 +311,9 @@
 
         <!-- Credentials Setup -->
         <div class="card">
-            <h2>🔐 Account Credentials</h2>
+            <h2>🔐 Account Credentials 
+                <span class="credentials-status missing" id="credentialsStatus">Not Set</span>
+            </h2>
             <div id="credentialsAlert"></div>
             <div class="form-group">
                 <label for="username">Username/Email:</label>
@@ -303,6 +324,7 @@
                 <input type="password" id="password" placeholder="Enter your password">
             </div>
             <button class="btn" onclick="saveCredentials()">💾 Save Credentials</button>
+            <button class="btn btn-secondary" onclick="checkCredentials()">🔍 Check Status</button>
         </div>
 
         <!-- Bot Controls -->
@@ -313,9 +335,9 @@
                     <span class="status-indicator stopped"></span>
                     <span>Bot Status: Stopped</span>
                 </span>
-                <button class="btn" id="startBtn" onclick="startBot()">▶️ Start Bot</button>
+                <button class="btn" id="startBtn" onclick="startBot()" disabled>▶️ Start Bot</button>
                 <button class="btn btn-danger" id="stopBtn" onclick="stopBot()" disabled>⏹️ Stop Bot</button>
-                <button class="btn btn-secondary" onclick="bookNow()">🎾 Book Now</button>
+                <button class="btn btn-secondary" onclick="bookNow()" id="bookNowBtn" disabled>🎾 Book Now</button>
                 <button class="btn btn-secondary" onclick="clearLogs()">🗑️ Clear Logs</button>
             </div>
         </div>
@@ -347,7 +369,7 @@
         <div class="card">
             <h2>📝 Activity Log</h2>
             <div class="log-container" id="logContainer">
-                <div class="log-entry">Bot initialized. Waiting for credentials...</div>
+                <div class="log-entry">Bot initialized. Checking for saved credentials...</div>
             </div>
         </div>
     </div>
@@ -360,6 +382,7 @@
         // Socket connection status
         socket.on('connect', () => {
             updateConnectionStatus(true);
+            checkCredentials(); // Check credentials when connected
         });
 
         socket.on('disconnect', () => {
@@ -398,9 +421,23 @@
             }
         }
 
+        function updateCredentialsStatus(hasCredentials) {
+            const statusEl = document.getElementById('credentialsStatus');
+            if (hasCredentials) {
+                statusEl.textContent = 'Saved';
+                statusEl.className = 'credentials-status saved';
+            } else {
+                statusEl.textContent = 'Not Set';
+                statusEl.className = 'credentials-status missing';
+            }
+        }
+
         function updateStatus(status) {
             botRunning = status.isRunning;
             hasCredentials = status.hasCredentials;
+
+            // Update credentials status
+            updateCredentialsStatus(hasCredentials);
 
             // Update status indicator
             const indicator = document.querySelector('#botStatusIndicator .status-indicator');
@@ -417,12 +454,34 @@
             // Update buttons
             document.getElementById('startBtn').disabled = status.isRunning || !status.hasCredentials;
             document.getElementById('stopBtn').disabled = !status.isRunning;
+            document.getElementById('bookNowBtn').disabled = !status.hasCredentials;
 
             // Update stats
             document.getElementById('bookingAttempts').textContent = status.bookingAttempts;
             document.getElementById('successfulBookings').textContent = status.successfulBookings;
             document.getElementById('lastCheck').textContent = status.lastCheck || 'Never';
             document.getElementById('nextCheck').textContent = status.nextCheck || '-';
+        }
+
+        async function checkCredentials() {
+            try {
+                const response = await fetch('/api/credentials/check');
+                const result = await response.json();
+                hasCredentials = result.hasCredentials;
+                updateCredentialsStatus(hasCredentials);
+                
+                // Update button states
+                document.getElementById('startBtn').disabled = botRunning || !hasCredentials;
+                document.getElementById('bookNowBtn').disabled = !hasCredentials;
+                
+                if (hasCredentials) {
+                    addLogEntry('✅ Credentials found and loaded');
+                } else {
+                    addLogEntry('❌ No saved credentials found');
+                }
+            } catch (error) {
+                addLogEntry('❌ Failed to check credentials: ' + error.message);
+            }
         }
 
         async function saveCredentials() {
@@ -447,9 +506,12 @@
                 if (response.ok) {
                     showAlert('success', 'Credentials saved successfully!', alertEl);
                     hasCredentials = true;
+                    updateCredentialsStatus(true);
                     document.getElementById('startBtn').disabled = false;
+                    document.getElementById('bookNowBtn').disabled = false;
                     // Clear password field for security
                     document.getElementById('password').value = '';
+                    addLogEntry('✅ Credentials saved and ready to use');
                 } else {
                     showAlert('error', result.error, alertEl);
                 }
@@ -538,10 +600,23 @@
         }
 
         // Initialize status on page load
-        fetch('/api/status')
-            .then(response => response.json())
-            .then(status => updateStatus(status))
-            .catch(error => console.error('Failed to load initial status:', error));
+        window.addEventListener('load', () => {
+            // Small delay to ensure socket is connected
+            setTimeout(() => {
+                fetch('/api/status')
+                    .then(response => response.json())
+                    .then(status => {
+                        updateStatus(status);
+                        if (status.hasCredentials) {
+                            addLogEntry('✅ Found saved credentials');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Failed to load initial status:', error);
+                        addLogEntry('❌ Failed to load initial status');
+                    });
+            }, 500);
+        });
     </script>
 </body>
 </html>

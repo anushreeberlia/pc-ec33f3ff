@@ -4,6 +4,7 @@ const cron = require('node-cron');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -12,6 +13,10 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.static('public'));
+
+// File paths for persistence
+const CREDENTIALS_FILE = 'credentials.json';
+const STATUS_FILE = 'bot-status.json';
 
 // Store user credentials and booking status
 let userCredentials = null;
@@ -25,6 +30,57 @@ let botStatus = {
 };
 
 let browser = null;
+let checkInterval = null;
+
+// Load persisted data on startup
+function loadPersistedData() {
+  // Load credentials
+  try {
+    if (fs.existsSync(CREDENTIALS_FILE)) {
+      const credData = fs.readFileSync(CREDENTIALS_FILE, 'utf8');
+      userCredentials = JSON.parse(credData);
+      logActivity('Loaded saved credentials');
+    }
+  } catch (error) {
+    logActivity('Failed to load credentials: ' + error.message);
+  }
+
+  // Load bot status
+  try {
+    if (fs.existsSync(STATUS_FILE)) {
+      const statusData = fs.readFileSync(STATUS_FILE, 'utf8');
+      const savedStatus = JSON.parse(statusData);
+      botStatus = { ...botStatus, ...savedStatus, isRunning: false }; // Always start stopped
+      logActivity('Loaded saved bot status');
+    }
+  } catch (error) {
+    logActivity('Failed to load bot status: ' + error.message);
+  }
+}
+
+// Save data to files
+function saveCredentials() {
+  try {
+    if (userCredentials) {
+      fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(userCredentials, null, 2));
+    }
+  } catch (error) {
+    logActivity('Failed to save credentials: ' + error.message);
+  }
+}
+
+function saveBotStatus() {
+  try {
+    const statusToSave = { ...botStatus };
+    delete statusToSave.isRunning; // Don't persist running state
+    fs.writeFileSync(STATUS_FILE, JSON.stringify(statusToSave, null, 2));
+  } catch (error) {
+    logActivity('Failed to save bot status: ' + error.message);
+  }
+}
+
+// Load data on startup
+loadPersistedData();
 
 // Health check
 app.get('/', (req, res) => {
@@ -48,9 +104,21 @@ app.post('/api/credentials', (req, res) => {
   }
   
   userCredentials = { username, password };
-  logActivity('Credentials updated');
+  saveCredentials();
+  logActivity('Credentials updated and saved');
+  
+  // Emit status update to all connected clients
+  io.emit('statusUpdate', {
+    ...botStatus,
+    hasCredentials: true
+  });
   
   res.json({ message: 'Credentials saved successfully' });
+});
+
+// Check credentials endpoint
+app.get('/api/credentials/check', (req, res) => {
+  res.json({ hasCredentials: !!userCredentials });
 });
 
 // Start/stop the bot
@@ -91,6 +159,7 @@ app.post('/api/clear-logs', (req, res) => {
   botStatus.errors = [];
   botStatus.bookingAttempts = 0;
   botStatus.successfulBookings = 0;
+  saveBotStatus();
   logActivity('Logs cleared');
   res.json({ message: 'Logs cleared' });
 });
@@ -106,10 +175,14 @@ function logActivity(message) {
   }
   
   botStatus.errors.unshift(logMessage);
+  saveBotStatus();
   
   // Emit to connected clients
   io.emit('log', logMessage);
-  io.emit('statusUpdate', botStatus);
+  io.emit('statusUpdate', {
+    ...botStatus,
+    hasCredentials: !!userCredentials
+  });
 }
 
 function startBot() {
@@ -118,10 +191,16 @@ function startBot() {
   botStatus.isRunning = true;
   logActivity('Bot started - monitoring for reservations');
   
+  // Clear any existing interval
+  if (checkInterval) {
+    clearInterval(checkInterval);
+  }
+  
   // Check every 30 seconds for available reservations
-  const checkInterval = setInterval(async () => {
+  checkInterval = setInterval(async () => {
     if (!botStatus.isRunning) {
       clearInterval(checkInterval);
+      checkInterval = null;
       return;
     }
     
@@ -134,7 +213,10 @@ function startBot() {
       logActivity(`Error during check: ${error.message}`);
     }
     
-    io.emit('statusUpdate', botStatus);
+    io.emit('statusUpdate', {
+      ...botStatus,
+      hasCredentials: !!userCredentials
+    });
   }, 30000);
   
   // Also schedule for common reservation opening times
@@ -153,6 +235,12 @@ function startBot() {
 
 function stopBot() {
   botStatus.isRunning = false;
+  
+  if (checkInterval) {
+    clearInterval(checkInterval);
+    checkInterval = null;
+  }
+  
   logActivity('Bot stopped');
   
   if (browser) {
@@ -174,6 +262,7 @@ async function checkAndBook() {
     if (result.success) {
       logActivity(`SUCCESS: ${result.message}`);
       botStatus.successfulBookings++;
+      saveBotStatus();
     } else {
       logActivity(`No booking made: ${result.message}`);
     }
@@ -184,6 +273,7 @@ async function checkAndBook() {
 
 async function attemptBooking() {
   botStatus.bookingAttempts++;
+  saveBotStatus();
   
   if (!browser) {
     browser = await puppeteer.launch({
@@ -207,7 +297,7 @@ async function attemptBooking() {
     await page.waitForTimeout(2000);
     
     // Try to find Alice Marble tennis courts reservation link
-    const aliceMarbleLink = await page.$x("//a[contains(text(), 'Alice Marble') or contains(text(), 'alice marble')]//ancestor::a");
+    const aliceMarbleLink = await page.$x("//a[contains(text(), 'Alice Marble') or contains(text(), 'alice marble')]");
     
     if (aliceMarbleLink.length > 0) {
       logActivity('Found Alice Marble reservation link');
@@ -328,7 +418,15 @@ io.on('connection', (socket) => {
   console.log('Client connected');
   
   // Send current status to new client
-  socket.emit('statusUpdate', botStatus);
+  socket.emit('statusUpdate', {
+    ...botStatus,
+    hasCredentials: !!userCredentials
+  });
+  
+  // Send existing log entries
+  botStatus.errors.forEach(log => {
+    socket.emit('log', log);
+  });
   
   socket.on('disconnect', () => {
     console.log('Client disconnected');
@@ -352,6 +450,18 @@ process.on('SIGTERM', async () => {
   });
 });
 
+process.on('SIGINT', async () => {
+  console.log('Shutting down gracefully...');
+  stopBot();
+  if (browser) {
+    await browser.close();
+  }
+  server.close(() => {
+    process.exit(0);
+  });
+});
+
 server.listen(PORT, () => {
   console.log(`SF Tennis Bot server running on port ${PORT}`);
+  logActivity('Server started and ready');
 });
